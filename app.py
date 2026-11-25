@@ -9,7 +9,7 @@ from typing import Any
 import httpx
 import streamlit as st
 
-# Sync Streamlit Cloud secrets into os.environ BEFORE importing src.pipeline
+# Sync Streamlit Cloud secrets into os.environ BEFORE importing src modules
 for _key in (
     "GROQ_API_KEY",
     "LANGFUSE_PUBLIC_KEY",
@@ -36,7 +36,7 @@ st.set_page_config(
 )
 
 
-@st.cache_resource(show_spinner="Initializing local RAG pipeline...")
+@st.cache_resource(show_spinner="Initializing HR RAG pipeline and vector index...")
 def _get_embedded_pipeline() -> EnterpriseRAGPipeline:
     """Load EnterpriseRAGPipeline in-process when external FastAPI is unavailable."""
     return EnterpriseRAGPipeline()
@@ -54,14 +54,19 @@ def _check_api_health() -> bool:
     if not API_BASE_URL:
         return False
     try:
-        with httpx.Client(timeout=3.0) as client:
+        with httpx.Client(timeout=2.0) as client:
             resp = client.get(f"{API_BASE_URL}/health")
             return resp.status_code == 200 and resp.json().get("status") == "ok"
     except Exception:
         return False
 
 
-def _fetch_json(method: str, path: str, payload: dict[str, Any] | None = None, timeout: float = 30.0) -> dict[str, Any]:
+def _fetch_json(
+    method: str,
+    path: str,
+    payload: dict[str, Any] | None = None,
+    timeout: float = 30.0,
+) -> dict[str, Any]:
     """Helper to call FastAPI endpoints safely."""
     url = f"{API_BASE_URL}{path}"
     with httpx.Client(timeout=timeout) as client:
@@ -137,8 +142,15 @@ with st.sidebar:
     try:
         if api_online:
             metrics = _fetch_json("GET", "/metrics", timeout=5.0)
+        elif "embedded_pipeline" in st.session_state:
+            metrics = st.session_state["embedded_pipeline"].metrics.snapshot()
         else:
-            metrics = _get_embedded_pipeline().metrics.snapshot()
+            metrics = {
+                "total_requests": 0,
+                "cache_hit_rate_pct": 0.0,
+                "avg_latency_ms": 0.0,
+                "total_cost_inr": 0.0,
+            }
 
         col1, col2 = st.columns(2)
         col1.metric("Requests", metrics.get("total_requests", 0))
@@ -168,7 +180,9 @@ with st.sidebar:
                 res = _fetch_json("POST", "/cache/clear", timeout=15.0)
                 st.success(res.get("message", "Cache cleared."))
             else:
-                _get_embedded_pipeline().cache.clear()
+                pipeline = _get_embedded_pipeline()
+                st.session_state["embedded_pipeline"] = pipeline
+                pipeline.cache.clear()
                 st.success("Semantic cache cleared.")
         except Exception as exc:
             st.error(f"Failed to clear cache: {exc}")
@@ -179,7 +193,9 @@ with st.sidebar:
                 if api_online:
                     summary = _fetch_json("POST", "/ingest", timeout=120.0)
                 else:
-                    summary = _run_embedded_ingest(_get_embedded_pipeline())
+                    pipeline = _get_embedded_pipeline()
+                    st.session_state["embedded_pipeline"] = pipeline
+                    summary = _run_embedded_ingest(pipeline)
                 st.success(
                     f"Indexed {summary.get('files_indexed', 0)} PDFs ({summary.get('total_chunks', 0)} chunks)."
                 )
@@ -211,7 +227,9 @@ if user_query:
                         timeout=60.0,
                     )
                 else:
-                    data = _get_embedded_pipeline().run(
+                    pipeline = _get_embedded_pipeline()
+                    st.session_state["embedded_pipeline"] = pipeline
+                    data = pipeline.run(
                         question=user_query,
                         session_id="streamlit-session",
                     )
@@ -255,5 +273,3 @@ if user_query:
                         },
                     }
                 )
-
-    st.rerun()

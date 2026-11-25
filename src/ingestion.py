@@ -1,5 +1,6 @@
 """PDF ingestion pipeline for building ChromaDB vectors and BM25 lexical index."""
 
+from functools import lru_cache
 import logging
 import pickle
 from pathlib import Path
@@ -15,9 +16,12 @@ from src.config import get_settings
 
 logger = logging.getLogger(__name__)
 
+INGEST_BATCH_SIZE = 32
 
+
+@lru_cache(maxsize=1)
 def get_embedding_model() -> FastEmbedEmbeddings:
-    """Initialize lightweight ONNX FastEmbed model (avoids heavy PyTorch RAM overhead)."""
+    """Initialize lightweight ONNX FastEmbed model once per process."""
     settings = get_settings()
     return FastEmbedEmbeddings(model_name=settings.embedding_model_name)
 
@@ -111,7 +115,9 @@ def run_ingestion(
         if existing and existing.get("ids"):
             vector_store.delete(ids=existing["ids"])
 
-        vector_store.add_documents(chunks)
+        for start in range(0, len(chunks), INGEST_BATCH_SIZE):
+            batch = chunks[start : start + INGEST_BATCH_SIZE]
+            vector_store.add_documents(batch)
 
         # Save serialized chunks so BM25Retriever can build its keyword index fast on startup
         bm25_path = target_persist_dir / settings.bm25_docs_filename
@@ -136,7 +142,7 @@ def run_ingestion(
 
 
 def ensure_index_exists() -> None:
-    """Build the index automatically if missing (essential for Render ephemeral disk)."""
+    """Build the index automatically if missing (essential for ephemeral cloud disk)."""
     settings = get_settings()
     chroma_sqlite = settings.vector_store_path / "chroma.sqlite3"
     bm25_file = settings.bm25_docs_path
