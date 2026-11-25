@@ -184,6 +184,7 @@ with st.sidebar:
                 st.session_state["embedded_pipeline"] = pipeline
                 pipeline.cache.clear()
                 st.success("Semantic cache cleared.")
+            st.rerun()
         except Exception as exc:
             st.error(f"Failed to clear cache: {exc}")
 
@@ -273,3 +274,5 @@ if user_query:
                         },
                     }
                 )
+
+    st.rerun()
