@@ -152,8 +152,9 @@ GUARDRAIL_PROMPT = ChatPromptTemplate.from_messages(
 
 def _has_hr_keyword(text: str) -> bool:
     """Return True if the query contains recognizable HR or workplace policy terms."""
-    lowered = f" {re.sub(r'[^a-z0-9\s\-]+', ' ', text.lower())} "
-    lowered = re.sub(r"\s+", " ", lowered)
+    cleaned = re.sub(r"[^a-z0-9\s\-]+", " ", text.lower())
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    lowered = f" {cleaned} "
     return any(kw in lowered for kw in HR_DOMAIN_KEYWORDS)
 
 
